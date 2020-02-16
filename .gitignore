@@ -1,0 +1,9 @@
+.idea
+vendor
+*.log
+env.bash
+*.env
+git_rsa
+git_rsa.pub
+.scannerwork
+.vscode
