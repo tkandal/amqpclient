@@ -1,4 +1,4 @@
-module git.it.ntnu.no/go/rmqclients
+module github.com/tkandal/amqpclient
 
 go 1.13
 
