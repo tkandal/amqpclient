@@ -30,7 +30,7 @@ func NewConsumer(amqpURI string, exchange string, exchangeType string, queue str
 
 	var err error
 
-	c.logger.Debug("Connecting to %s", amqpURI)
+	c.logger.Debugf("Connecting to %s", amqpURI)
 	c.connection, err = amqp.Dial(amqpURI)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dial %s failed; error = %v", amqpURI, err)
@@ -150,7 +150,7 @@ func (c *Consumer) handle(deliveries <-chan amqp.Delivery, sendQ chan amqp.Deliv
 			break
 		}
 	}
-	c.logger.Warn("Handle: deliveries channel closed")
+	c.logger.Warn("deliveries channel closed")
 	close(sendQ)
 	c.done <- nil
 }
