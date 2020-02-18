@@ -1,4 +1,4 @@
-package amqclients
+package amqclient
 
 import (
 	"fmt"
