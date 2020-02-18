@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// Producer struct
 type Producer struct {
 	connection *amqp.Connection
 	channel    *amqp.Channel
