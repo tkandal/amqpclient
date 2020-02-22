@@ -61,7 +61,7 @@ func NewProducer(amqpURI string, exchange string, exchangeType string, key strin
 
 	// Reliable publisher confirms require confirm.select support from the
 	// connection.
-	if reliable {
+	if p.reliable {
 		if err := p.channel.Confirm(false); err != nil {
 			return nil, fmt.Errorf("put channel in comfirm mode failed; error = %v", err)
 		}
