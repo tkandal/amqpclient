@@ -8,8 +8,11 @@ import (
 
 // Producer struct
 type Producer struct {
+	amqpURI    string
 	connection *amqp.Connection
 	channel    *amqp.Channel
+	confirms   chan amqp.Confirmation
+	reliable   bool
 	tag        string
 	done       chan error
 	logger     *zap.SugaredLogger
@@ -19,8 +22,11 @@ type Producer struct {
 func NewProducer(amqpURI string, exchange string, exchangeType string, key string, ctag string, reliable bool,
 	logger *zap.SugaredLogger) (*Producer, error) {
 	p := &Producer{
+		amqpURI:    amqpURI,
 		connection: nil,
 		channel:    nil,
+		confirms:   nil,
+		reliable:   reliable,
 		tag:        ctag,
 		done:       make(chan error),
 		logger:     logger,
@@ -57,12 +63,10 @@ func NewProducer(amqpURI string, exchange string, exchangeType string, key strin
 	// connection.
 	if reliable {
 		if err := p.channel.Confirm(false); err != nil {
-			return nil, fmt.Errorf("put channel in comnfirm mode failed; error = %v", err)
+			return nil, fmt.Errorf("put channel in comfirm mode failed; error = %v", err)
 		}
 
-		ack, nack := p.channel.NotifyConfirm(make(chan uint64, 1), make(chan uint64, 1))
-
-		defer p.confirmOne(ack, nack)
+		p.confirms = p.channel.NotifyPublish(make(chan amqp.Confirmation, 1))
 	}
 
 	return p, nil
@@ -72,24 +76,37 @@ func NewProducer(amqpURI string, exchange string, exchangeType string, key strin
 func (p *Producer) Publish(exchange string, routingKey string, body []byte) error {
 	p.logger.Debugf("Publishing %s (%dB)", body, len(body))
 
-	if err := p.channel.Publish(
-		exchange,   // publish to an exchange
-		routingKey, // routing to 0 or more queues
-		false,      // mandatory
-		false,      // immediate
-		amqp.Publishing{
-			Headers:         amqp.Table{},
-			ContentType:     "text/plain",
-			ContentEncoding: "",
-			Body:            body,
-			DeliveryMode:    amqp.Transient, // 1=non-persistent, 2=persistent
-			Priority:        0,              // 0-9
-			// a bunch of application/implementation-specific fields
-		},
-	); err != nil {
-		return fmt.Errorf("exchange publish failed; error = %v", err)
+	for {
+		if err := p.channel.Publish(
+			exchange,   // publish to an exchange
+			routingKey, // routing to 0 or more queues
+			false,      // mandatory
+			false,      // immediate
+			amqp.Publishing{
+				Headers:         amqp.Table{},
+				ContentType:     "text/plain",
+				ContentEncoding: "",
+				Body:            body,
+				DeliveryMode:    amqp.Transient, // 1=non-persistent, 2=persistent
+				Priority:        0,              // 0-9
+				// a bunch of application/implementation-specific fields
+			},
+		); err != nil {
+			return fmt.Errorf("exchange publish failed; error = %v", err)
+		}
+		if p.reliable {
+			select {
+			case confirm, ok := <-p.confirms:
+				if !ok {
+					return fmt.Errorf("confirm channel closed")
+				}
+				if !confirm.Ack {
+					continue
+				}
+			}
+		}
+		break
 	}
-
 	return nil
 }
 
