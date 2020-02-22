@@ -94,9 +94,11 @@ func (p *Producer) Publish(exchange string, routingKey string, body []byte) erro
 		); err != nil {
 			return fmt.Errorf("exchange publish failed; error = %v", err)
 		}
+		var confirm amqp.Confirmation
+		var ok = true
 		if p.reliable {
 			select {
-			case confirm, ok := <-p.confirms:
+			case confirm, ok = <-p.confirms:
 				if !ok {
 					return fmt.Errorf("confirm channel closed")
 				}
@@ -105,6 +107,7 @@ func (p *Producer) Publish(exchange string, routingKey string, body []byte) erro
 				}
 			}
 		}
+		p.logger.Infof("confirmed %d", confirm.DeliveryTag)
 		break
 	}
 	return nil
