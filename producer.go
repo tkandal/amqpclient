@@ -113,6 +113,7 @@ func (p *Producer) Publish(exchange string, routingKey string, body []byte) erro
 }
 
 func (p *Producer) Shutdown() {
+	p.logger.Warn("producer received shutdown ...")
 	p.cancel()
 }
 
