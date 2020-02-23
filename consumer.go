@@ -51,7 +51,7 @@ func NewConsumer(amqpURI string, tls *tls.Config, exchange string, exchangeType 
 
 func (c *Consumer) Shutdown() {
 	c.logger.Warn("consumer received shutdown ...")
-	close(c.quit)
+	c.quit <- struct{}{}
 	c.cancel()
 }
 
