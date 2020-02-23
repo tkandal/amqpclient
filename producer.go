@@ -136,7 +136,7 @@ func redialProducer(ctx context.Context, p *Producer) chan chan *client {
 	go func() {
 		clientChan := make(chan *client)
 		defer close(clientChanChan)
-		close(clientChan)
+		defer close(clientChan)
 
 		for {
 			select {
