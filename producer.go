@@ -64,15 +64,18 @@ func NewProducer(amqpURI string, tls *tls.Config, exchange string, exchangeType 
 
 // Publish publishes a new message with the exchange name and routing-key
 func (p *Producer) Publish(exchange string, routingKey string, body []byte) error {
-	p.logger.Debugf("Publishing %s (%dB)", body, len(body))
+	p.logger.Debugf("publishing %s (%d bytes)", body, len(body))
 
 	for {
 		if p.client == nil {
 			clientChan, ok := <-p.clientChanChan
 			if !ok {
+				return fmt.Errorf("cannot get a new producer-channel; channel is closed")
+			}
+			p.client, ok = <-clientChan
+			if !ok {
 				return fmt.Errorf("cannot get a new producer; channel is closed")
 			}
-			p.client = <-clientChan
 		}
 
 		if err := p.client.channel.Publish(
@@ -143,7 +146,7 @@ func redialProducer(ctx context.Context, p *Producer) chan chan *client {
 			select {
 			case clientChanChan <- clientChan:
 			case <-ctx.Done():
-				p.logger.Errorf("context done; error = %v", ctx.Done())
+				p.logger.Warnf("context done; error = %v", ctx.Err())
 				return
 			}
 
@@ -153,7 +156,7 @@ func redialProducer(ctx context.Context, p *Producer) chan chan *client {
 				channel:    nil,
 				confirms:   nil,
 			}
-			p.logger.Debugf("Connecting to %s", p.amqpURI)
+			p.logger.Debugf("connecting to %s", p.amqpURI)
 			cfg := amqp.Config{
 				Heartbeat: 10 * time.Second,
 				Dial: func(nw string, addr string) (net.Conn, error) {
@@ -170,14 +173,14 @@ func redialProducer(ctx context.Context, p *Producer) chan chan *client {
 				return
 			}
 
-			p.logger.Debug("Getting Channel ")
+			p.logger.Debug("getting Channel ")
 			c.channel, err = c.connection.Channel()
 			if err != nil {
 				p.logger.Errorf("get channel failed; error = %v", err)
 				return
 			}
 
-			p.logger.Debugf("Declaring Exchange (%s)", p.exchange)
+			p.logger.Debugf("declaring exchange (%s)", p.exchange)
 			if err := c.channel.ExchangeDeclare(
 				p.exchange,     // name
 				p.exchangeType, // type
@@ -203,7 +206,7 @@ func redialProducer(ctx context.Context, p *Producer) chan chan *client {
 			select {
 			case clientChan <- c:
 			case <-ctx.Done():
-				p.logger.Errorf("context done; error = %v", ctx.Err())
+				p.logger.Warnf("context done; error = %v", ctx.Err())
 				return
 			}
 		}

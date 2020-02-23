@@ -56,6 +56,7 @@ func (c *Consumer) Shutdown() {
 }
 
 func (c *Consumer) handle() {
+	defer close(c.sendChan)
 
 	var deliveries <-chan amqp.Delivery
 	var err error
@@ -63,10 +64,14 @@ func (c *Consumer) handle() {
 		if c.client == nil {
 			clientChan, ok := <-c.clientChanChan
 			if !ok {
+				c.logger.Errorf("cannot get a new client-channel; channel is closed")
+				return
+			}
+			c.client, ok = <-clientChan
+			if !ok {
 				c.logger.Errorf("cannot get a new client; channel is closed")
 				return
 			}
-			c.client = <-clientChan
 			c.logger.Debugf("queue bound to exchange, starting consume (consumer tag '%s')", c.ctag)
 			deliveries, err = c.client.channel.Consume(
 				c.queue, // name
@@ -94,14 +99,13 @@ func (c *Consumer) handle() {
 				continue
 			}
 			if err := d.Ack(false); err != nil {
+				c.logger.Errorf("acknowledge failed; error = %v", err)
 				_ = c.client.close()
 				c.client = nil
 				continue
 			}
 			c.sendChan <- d
-
 		case <-c.quit:
-			close(c.sendChan)
 			return
 		}
 	}
@@ -119,7 +123,7 @@ func redialConsumer(ctx context.Context, con *Consumer) chan chan *client {
 			select {
 			case clientChanChan <- clientChan:
 			case <-ctx.Done():
-				con.logger.Errorf("context done; error = %v", ctx.Done())
+				con.logger.Errorf("context done; error = %v", ctx.Err())
 				return
 			}
 
@@ -129,7 +133,7 @@ func redialConsumer(ctx context.Context, con *Consumer) chan chan *client {
 				channel:    nil,
 				confirms:   nil,
 			}
-			con.logger.Debugf("Connecting to %s", con.amqpURI)
+			con.logger.Debugf("connecting to %s", con.amqpURI)
 			cfg := amqp.Config{
 				Heartbeat: 10 * time.Second,
 				Dial: func(nw string, addr string) (net.Conn, error) {
@@ -146,14 +150,14 @@ func redialConsumer(ctx context.Context, con *Consumer) chan chan *client {
 				return
 			}
 
-			con.logger.Debug("Getting Channel")
+			con.logger.Debug("getting Channel")
 			c.channel, err = c.connection.Channel()
 			if err != nil {
 				con.logger.Errorf("get channel failed; error = %v", err)
 				return
 			}
 
-			con.logger.Debugf("Declaring Exchange (%s)", con.exchange)
+			con.logger.Debugf("declaring exchange (%s)", con.exchange)
 			if err = c.channel.ExchangeDeclare(
 				con.exchange,     // name of the exchange
 				con.exchangeType, // type
@@ -167,7 +171,7 @@ func redialConsumer(ctx context.Context, con *Consumer) chan chan *client {
 				return
 			}
 
-			con.logger.Debugf("Declaring Queue (%s)", con.queue)
+			con.logger.Debugf("declaring queue (%s)", con.queue)
 			state, err := c.channel.QueueDeclare(
 				con.queue, // name of the queue
 				true,      // durable
@@ -181,7 +185,7 @@ func redialConsumer(ctx context.Context, con *Consumer) chan chan *client {
 				return
 			}
 
-			con.logger.Debugf("Declared Queue (%d messages, %d consumers), binding to Exchange (key '%s')",
+			con.logger.Debugf("declared queue (%d messages, %d consumers), binding to exchange (key '%s')",
 				state.Messages, state.Consumers, con.routingKey)
 			if err = c.channel.QueueBind(
 				con.queue,      // name of the queue
