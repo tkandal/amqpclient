@@ -51,8 +51,8 @@ func NewConsumer(amqpURI string, tls *tls.Config, exchange string, exchangeType 
 
 func (c *Consumer) Shutdown() {
 	c.logger.Warn("consumer received shutdown ...")
-	c.quit <- struct{}{}
 	c.cancel()
+	close(c.quit)
 }
 
 func (c *Consumer) handle() {
@@ -116,8 +116,8 @@ func redialConsumer(ctx context.Context, con *Consumer) chan chan *client {
 
 	go func() {
 		clientChan := make(chan *client)
-		defer close(clientChanChan)
 		defer close(clientChan)
+		defer close(clientChanChan)
 
 		for {
 			select {
