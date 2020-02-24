@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/streadway/amqp"
 	"go.uber.org/zap"
+	"time"
 )
 
 // Producer struct
@@ -23,6 +24,7 @@ type Producer struct {
 	cancel         context.CancelFunc
 	sent           int64
 	acks           int64
+	nacks          int64
 }
 
 type client struct {
@@ -54,8 +56,6 @@ func NewProducer(amqpURI string, tls *tls.Config, exchange string, exchangeType 
 		ctag:         ctag,
 		reliable:     reliable,
 		logger:       logger,
-		sent:         0,
-		acks:         0,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -72,11 +72,11 @@ func (p *Producer) Publish(exchange string, routingKey string, body []byte) erro
 		if p.client == nil {
 			clientChan, ok := <-p.clientChanChan
 			if !ok {
-				return fmt.Errorf("cannot get a new producer-channel; channel is closed")
+				return fmt.Errorf("cannot get a new producer-channel; error = channel is closed")
 			}
 			p.client, ok = <-clientChan
 			if !ok {
-				return fmt.Errorf("cannot get a new producer; channel is closed")
+				return fmt.Errorf("cannot get a new producer; error = channel is closed")
 			}
 		}
 
@@ -102,18 +102,9 @@ func (p *Producer) Publish(exchange string, routingKey string, body []byte) erro
 		}
 		p.sent++
 		if p.client.confirms != nil {
-			for p.acks < p.sent {
-				select {
-				case confirm, ok := <-p.client.confirms:
-					if !ok {
-						return fmt.Errorf("confirm channel closed")
-					}
-					if !confirm.Ack {
-						continue
-					}
-					p.logger.Infof("confirmed %d", confirm.DeliveryTag)
-					p.acks++
-				}
+			if err := p.confirm(); err != nil {
+				// Ignore error, only log
+				p.logger.Warnf("get confirm failed; error = %v", err)
 			}
 		}
 		break
@@ -121,8 +112,33 @@ func (p *Producer) Publish(exchange string, routingKey string, body []byte) erro
 	return nil
 }
 
+func (p *Producer) confirm() error {
+	for p.acks < p.sent && !p.client.connection.IsClosed() {
+		select {
+		case confirm, ok := <-p.client.confirms:
+			if !ok {
+				return fmt.Errorf("confirm channel closed")
+			}
+			if !confirm.Ack {
+				p.nacks++
+				continue
+			}
+			p.acks++
+			p.logger.Infof("confirmed %d", confirm.DeliveryTag)
+			p.logger.Infof("confirmations (%d/%d/%d)", p.nacks, p.acks, p.sent)
+		}
+	}
+	return nil
+}
+
 func (p *Producer) Shutdown() {
 	p.logger.Warn("producer received shutdown ...")
+	if p.client.confirms != nil {
+		if err := p.confirm(); err != nil {
+			// Ignore error, only log
+			p.logger.Warnf("get confirm failed; error = %v", err)
+		}
+	}
 	p.cancel()
 }
 
@@ -153,7 +169,8 @@ func redialProducer(ctx context.Context, p *Producer) chan chan *client {
 			c.connection, err = amqp.DialConfig(p.amqpURI, defaultAMQPConfig(p.tls))
 			if err != nil {
 				p.logger.Errorf("dial %s failed; error = %v ", p.amqpURI, err)
-				return
+				time.Sleep(time.Second)
+				continue
 			}
 
 			p.logger.Debug("getting Channel ")
@@ -184,7 +201,7 @@ func redialProducer(ctx context.Context, p *Producer) chan chan *client {
 					p.logger.Errorf("put channel in confirm mode failed; error = %v", err)
 					return
 				}
-				c.confirms = c.channel.NotifyPublish(make(chan amqp.Confirmation, 1))
+				c.confirms = c.channel.NotifyPublish(make(chan amqp.Confirmation, 128))
 			}
 			select {
 			case clientChan <- c:
