@@ -77,7 +77,6 @@ func (c *Consumer) handle(ctx context.Context) {
 				c.logger.Errorf("context done; error = %v", ctx.Err())
 				return
 			}
-
 			c.logger.Debugf("queue bound to exchange, starting consume (consumer tag '%s')", c.ctag)
 			deliveries, err = c.client.channel.Consume(
 				c.queue, // name
@@ -106,14 +105,15 @@ func (c *Consumer) handle(ctx context.Context) {
 			}
 			if err := d.Ack(false); err != nil {
 				c.logger.Errorf("acknowledge failed; error = %v", err)
-				_ = c.client.close()
-				c.client = nil
+				_ = d.Nack(false, false)
 				continue
 			}
 			c.sendChan <- d
 		case <-ctx.Done():
 			c.logger.Errorf("context done; error = %v", ctx.Err())
-			return
+			if err = c.client.channel.Cancel(c.ctag, false); err != nil {
+				c.logger.Errorf("cancel channel failed; error = %v", err)
+			}
 		}
 	}
 }
@@ -152,6 +152,12 @@ func redialConsumer(ctx context.Context, con *Consumer) chan chan *client {
 			c.channel, err = c.connection.Channel()
 			if err != nil {
 				con.logger.Errorf("get channel failed; error = %v", err)
+				return
+			}
+
+			con.logger.Debug("setting QoS")
+			if err = c.channel.Qos(1, 0, false); err != nil {
+				con.logger.Errorf("set QoS failed; error = %v", err)
 				return
 			}
 
@@ -195,6 +201,7 @@ func redialConsumer(ctx context.Context, con *Consumer) chan chan *client {
 				con.logger.Errorf("bind queue failed; error = %v", err)
 				return
 			}
+
 
 			select {
 			case clientChan <- c:
