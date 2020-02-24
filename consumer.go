@@ -5,8 +5,6 @@ import (
 	"crypto/tls"
 	"github.com/streadway/amqp"
 	"go.uber.org/zap"
-	"net"
-	"time"
 )
 
 type Consumer struct {
@@ -22,7 +20,6 @@ type Consumer struct {
 	clientChanChan chan chan *client
 	sendChan       chan amqp.Delivery
 	cancel         context.CancelFunc
-	quit           chan struct{}
 }
 
 func NewConsumer(amqpURI string, tls *tls.Config, exchange string, exchangeType string, queue string, key string,
@@ -38,40 +35,49 @@ func NewConsumer(amqpURI string, tls *tls.Config, exchange string, exchangeType 
 		ctag:         ctag,
 		logger:       logger,
 		sendChan:     make(chan amqp.Delivery),
-		quit:         make(chan struct{}),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
 	c.clientChanChan = redialConsumer(ctx, c)
 
-	go c.handle()
+	go c.handle(ctx)
 	return c, c.sendChan, nil
 }
 
 func (c *Consumer) Shutdown() {
 	c.logger.Warn("consumer received shutdown ...")
 	c.cancel()
-	close(c.quit)
 }
 
-func (c *Consumer) handle() {
+func (c *Consumer) handle(ctx context.Context) {
 	defer close(c.sendChan)
 
 	var deliveries <-chan amqp.Delivery
 	var err error
 	for {
 		if c.client == nil {
-			clientChan, ok := <-c.clientChanChan
-			if !ok {
-				c.logger.Errorf("cannot get a new client-channel; channel is closed")
+			select {
+			case clientChan, ok := <-c.clientChanChan:
+				if !ok {
+					c.logger.Errorf("cannot get a new client-channel; channel is closed")
+					return
+				}
+				select {
+				case c.client, ok = <-clientChan:
+					if !ok {
+						c.logger.Errorf("cannot get a new client; channel is closed")
+						return
+					}
+				case <-ctx.Done():
+					c.logger.Errorf("context done; error = %v", ctx.Err())
+					return
+				}
+			case <-ctx.Done():
+				c.logger.Errorf("context done; error = %v", ctx.Err())
 				return
 			}
-			c.client, ok = <-clientChan
-			if !ok {
-				c.logger.Errorf("cannot get a new client; channel is closed")
-				return
-			}
+
 			c.logger.Debugf("queue bound to exchange, starting consume (consumer tag '%s')", c.ctag)
 			deliveries, err = c.client.channel.Consume(
 				c.queue, // name
@@ -105,7 +111,8 @@ func (c *Consumer) handle() {
 				continue
 			}
 			c.sendChan <- d
-		case <-c.quit:
+		case <-ctx.Done():
+			c.logger.Errorf("context done; error = %v", ctx.Err())
 			return
 		}
 	}
@@ -134,17 +141,8 @@ func redialConsumer(ctx context.Context, con *Consumer) chan chan *client {
 				confirms:   nil,
 			}
 			con.logger.Debugf("connecting to %s", con.amqpURI)
-			cfg := amqp.Config{
-				Heartbeat: 10 * time.Second,
-				Dial: func(nw string, addr string) (net.Conn, error) {
-					return net.DialTimeout(nw, addr, 10*time.Second)
-				},
-			}
-			if con.tls != nil {
-				cfg.TLSClientConfig = con.tls
-			}
 
-			c.connection, err = amqp.DialConfig(con.amqpURI, cfg)
+			c.connection, err = amqp.DialConfig(con.amqpURI, defaultAMQPConfig(con.tls))
 			if err != nil {
 				con.logger.Errorf("dial %s failed; error = %v ", con.amqpURI, err)
 				return

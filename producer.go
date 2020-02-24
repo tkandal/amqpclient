@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"github.com/streadway/amqp"
 	"go.uber.org/zap"
-	"net"
-	"time"
 )
 
 // Producer struct
@@ -23,6 +21,8 @@ type Producer struct {
 	client         *client
 	clientChanChan chan chan *client
 	cancel         context.CancelFunc
+	sent           int64
+	acks           int64
 }
 
 type client struct {
@@ -54,6 +54,8 @@ func NewProducer(amqpURI string, tls *tls.Config, exchange string, exchangeType 
 		ctag:         ctag,
 		reliable:     reliable,
 		logger:       logger,
+		sent:         0,
+		acks:         0,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -98,16 +100,20 @@ func (p *Producer) Publish(exchange string, routingKey string, body []byte) erro
 			p.client = nil
 			return err
 		}
+		p.sent++
 		if p.client.confirms != nil {
-			select {
-			case confirm, ok := <-p.client.confirms:
-				if !ok {
-					return fmt.Errorf("confirm channel closed")
+			for p.acks < p.sent {
+				select {
+				case confirm, ok := <-p.client.confirms:
+					if !ok {
+						return fmt.Errorf("confirm channel closed")
+					}
+					if !confirm.Ack {
+						continue
+					}
+					p.logger.Infof("confirmed %d", confirm.DeliveryTag)
+					p.acks++
 				}
-				if !confirm.Ack {
-					continue
-				}
-				p.logger.Infof("confirmed %d", confirm.DeliveryTag)
 			}
 		}
 		break
@@ -120,27 +126,13 @@ func (p *Producer) Shutdown() {
 	p.cancel()
 }
 
-// One would typically keep a channel of publishings, a sequence number, and a
-// set of unacknowledged sequence numbers and loop until the publishing channel
-// is closed.
-func (p *Producer) confirmOne(ack, nack chan uint64) {
-	p.logger.Debug("waiting for confirmation of one publishing")
-
-	select {
-	case tag := <-ack:
-		p.logger.Infof("confirmed delivery with delivery tag: %d", tag)
-	case tag := <-nack:
-		p.logger.Warnf("failed delivery of delivery tag: %d", tag)
-	}
-}
-
 func redialProducer(ctx context.Context, p *Producer) chan chan *client {
 	clientChanChan := make(chan chan *client)
 
 	go func() {
 		clientChan := make(chan *client)
-		defer close(clientChanChan)
 		defer close(clientChan)
+		defer close(clientChanChan)
 
 		for {
 			select {
@@ -157,17 +149,8 @@ func redialProducer(ctx context.Context, p *Producer) chan chan *client {
 				confirms:   nil,
 			}
 			p.logger.Debugf("connecting to %s", p.amqpURI)
-			cfg := amqp.Config{
-				Heartbeat: 10 * time.Second,
-				Dial: func(nw string, addr string) (net.Conn, error) {
-					return net.DialTimeout(nw, addr, 10*time.Second)
-				},
-			}
-			if p.tls != nil {
-				cfg.TLSClientConfig = p.tls
-			}
 
-			c.connection, err = amqp.DialConfig(p.amqpURI, cfg)
+			c.connection, err = amqp.DialConfig(p.amqpURI, defaultAMQPConfig(p.tls))
 			if err != nil {
 				p.logger.Errorf("dial %s failed; error = %v ", p.amqpURI, err)
 				return
