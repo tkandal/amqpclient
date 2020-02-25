@@ -140,6 +140,8 @@ func (p *Producer) redial(ctx context.Context) chan chan *amqpClient {
 			case clientChanChan <- clientChan:
 			case <-ctx.Done():
 				p.logger.Warnf("context done; error = %v", ctx.Err())
+				_ = p.client.close()
+				p.client = nil
 				return
 			}
 			/*
@@ -211,6 +213,8 @@ func (p *Producer) redial(ctx context.Context) chan chan *amqpClient {
 			case clientChan <- ac:
 			case <-ctx.Done():
 				p.logger.Warnf("context done; error = %v", ctx.Err())
+				_ = p.client.close()
+				p.client = nil
 				return
 			}
 		}
