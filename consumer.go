@@ -119,6 +119,7 @@ func (c *Consumer) handle(ctx context.Context) {
 			if !canceled {
 				if err = c.client.channel.Cancel(c.ctag, false); err != nil {
 					c.logger.Errorf("cancel channel failed; error = %v", err)
+					continue
 				}
 				canceled = true
 			}
@@ -141,82 +142,6 @@ func (c *Consumer) redial(ctx context.Context) chan chan *amqpClient {
 				c.logger.Errorf("context done; error = %v", ctx.Err())
 				return
 			}
-
-			/*
-				var err error
-				ac := &amqpClient{
-					connection: nil,
-					channel:    nil,
-					confirms:   nil,
-				}
-
-				c.logger.Debugf("connecting to %s", c.amqpURI)
-				delay := time.Duration(0)
-				for {
-					ac.connection, err = amqp.DialConfig(c.amqpURI, defaultAMQPConfig(c.tls))
-					if err != nil {
-						c.logger.Errorf("dial %s failed; error = %v ", c.amqpURI, err)
-						delay = sleepDelay(delay)
-						time.Sleep(delay)
-						continue
-					}
-					break
-				}
-
-				c.logger.Debug("getting channel")
-				ac.channel, err = ac.connection.Channel()
-				if err != nil {
-					c.logger.Errorf("get channel failed; error = %v", err)
-					return
-				}
-
-				c.logger.Debug("setting QoS")
-				if err = ac.channel.Qos(1, 0, false); err != nil {
-					c.logger.Errorf("set QoS failed; error = %v", err)
-					return
-				}
-
-				c.logger.Debugf("declaring exchange (%s)", c.exchange)
-				if err = ac.channel.ExchangeDeclare(
-					c.exchange,     // name of the exchange
-					c.exchangeType, // type
-					true,           // durable
-					false,          // delete when complete
-					false,          // internal
-					false,          // noWait
-					nil,            // arguments
-				); err != nil {
-					c.logger.Errorf("declare exchange failed; error = %v", err)
-					return
-				}
-
-				c.logger.Debugf("declaring queue (%s)", c.queue)
-				state, err := ac.channel.QueueDeclare(
-					c.queue, // name of the queue
-					true,    // durable
-					false,   // delete when usused
-					false,   // exclusive
-					false,   // noWait
-					nil,     // arguments
-				)
-				if err != nil {
-					c.logger.Errorf("declare queue failed; error = %v", err)
-					return
-				}
-
-				c.logger.Debugf("declared queue (%d messages, %d consumers), binding to exchange (key '%s')",
-					state.Messages, state.Consumers, c.routingKey)
-				if err = ac.channel.QueueBind(
-					c.queue,      // name of the queue
-					c.routingKey, // routingKey
-					c.exchange,   // sourceExchange
-					false,        // noWait
-					nil,          // arguments
-				); err != nil {
-					c.logger.Errorf("bind queue failed; error = %v", err)
-					return
-				}
-			*/
 
 			var err error
 			var ac *amqpClient
