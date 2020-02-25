@@ -19,31 +19,15 @@ type Producer struct {
 	ctag           string
 	reliable       bool
 	logger         *zap.SugaredLogger
-	client         *client
-	clientChanChan chan chan *client
+	client         *amqpClient
+	clientChanChan chan chan *amqpClient
 	cancel         context.CancelFunc
 	sent           int64
 	acks           int64
 	nacks          int64
 }
 
-type client struct {
-	connection *amqp.Connection
-	channel    *amqp.Channel
-	confirms   chan amqp.Confirmation
-}
-
-func (c *client) close() error {
-	if c.confirms != nil {
-		close(c.confirms)
-	}
-	if err := c.channel.Close(); err != nil {
-		return err
-	}
-	return c.connection.Close()
-}
-
-// NewProducer allocates a new amqp producer
+// NewProducer allocates a new AMQP producer
 func NewProducer(amqpURI string, tls *tls.Config, exchange string, exchangeType string, key string, ctag string,
 	reliable bool, logger *zap.SugaredLogger) (*Producer, error) {
 
@@ -60,7 +44,7 @@ func NewProducer(amqpURI string, tls *tls.Config, exchange string, exchangeType 
 
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
-	p.clientChanChan = redialProducer(ctx, p)
+	p.clientChanChan = p.redial(ctx)
 	return p, nil
 }
 
@@ -131,6 +115,7 @@ func (p *Producer) confirm() error {
 	return nil
 }
 
+// Shutdown shuts down this producer
 func (p *Producer) Shutdown() {
 	p.logger.Warn("producer received shutdown ...")
 	if p.client.confirms != nil {
@@ -142,11 +127,11 @@ func (p *Producer) Shutdown() {
 	p.cancel()
 }
 
-func redialProducer(ctx context.Context, p *Producer) chan chan *client {
-	clientChanChan := make(chan chan *client)
+func (p *Producer) redial(ctx context.Context) chan chan *amqpClient {
+	clientChanChan := make(chan chan *amqpClient)
 
 	go func() {
-		clientChan := make(chan *client)
+		clientChan := make(chan *amqpClient)
 		defer close(clientChan)
 		defer close(clientChanChan)
 
@@ -157,54 +142,73 @@ func redialProducer(ctx context.Context, p *Producer) chan chan *client {
 				p.logger.Warnf("context done; error = %v", ctx.Err())
 				return
 			}
+			/*
+				var err error
+				var ac = &amqpclient{
+					connection: nil,
+					channel:    nil,
+					confirms:   nil,
+				}
 
-			var err error
-			c := &client{
-				connection: nil,
-				channel:    nil,
-				confirms:   nil,
-			}
-			p.logger.Debugf("connecting to %s", p.amqpURI)
+				p.logger.Debugf("connecting to %s", p.amqpURI)
+				delay := time.Duration(0)
+				for {
+					ac.connection, err = amqp.DialConfig(p.amqpURI, defaultAMQPConfig(p.tls))
+					if err != nil {
+						p.logger.Errorf("dial %s failed; error = %v ", p.amqpURI, err)
+						delay = sleepDelay(delay)
+						time.Sleep(delay)
+						continue
+					}
+					break
+				}
 
-			c.connection, err = amqp.DialConfig(p.amqpURI, defaultAMQPConfig(p.tls))
-			if err != nil {
-				p.logger.Errorf("dial %s failed; error = %v ", p.amqpURI, err)
-				time.Sleep(time.Second)
-				continue
-			}
-
-			p.logger.Debug("getting Channel ")
-			c.channel, err = c.connection.Channel()
-			if err != nil {
-				p.logger.Errorf("get channel failed; error = %v", err)
-				return
-			}
-
-			p.logger.Debugf("declaring exchange (%s)", p.exchange)
-			if err := c.channel.ExchangeDeclare(
-				p.exchange,     // name
-				p.exchangeType, // type
-				true,           // durable
-				false,          // auto-deleted
-				false,          // internal
-				false,          // noWait
-				nil,            // arguments
-			); err != nil {
-				p.logger.Errorf("exchange declare failed; error = %v", err)
-				return
-			}
-
-			// Reliable publisher confirms require confirm.select support from the
-			// connection.
-			if p.reliable {
-				if err := c.channel.Confirm(false); err != nil {
-					p.logger.Errorf("put channel in confirm mode failed; error = %v", err)
+				p.logger.Debug("getting channel ")
+				ac.channel, err = ac.connection.Channel()
+				if err != nil {
+					p.logger.Errorf("get channel failed; error = %v", err)
 					return
 				}
-				c.confirms = c.channel.NotifyPublish(make(chan amqp.Confirmation, 128))
+
+				p.logger.Debugf("declaring exchange (%s)", p.exchange)
+				if err := ac.channel.ExchangeDeclare(
+					p.exchange,     // name
+					p.exchangeType, // type
+					true,           // durable
+					false,          // auto-deleted
+					false,          // internal
+					false,          // noWait
+					nil,            // arguments
+				); err != nil {
+					p.logger.Errorf("exchange declare failed; error = %v", err)
+					return
+				}
+
+				// Reliable publisher confirms require confirm.select support from the
+				// connection.
+				if p.reliable {
+					if err := ac.channel.Confirm(false); err != nil {
+						p.logger.Errorf("put channel in confirm mode failed; error = %v", err)
+						return
+					}
+					ac.confirms = ac.channel.NotifyPublish(make(chan amqp.Confirmation, confirmCapacity))
+				}
+			*/
+			var err error
+			var ac *amqpClient
+			var delay = time.Duration(0)
+
+			for ac == nil {
+				ac, err = p.connect()
+				if err != nil {
+					delay = connectDelay(delay)
+					time.Sleep(delay)
+					continue
+				}
 			}
+
 			select {
-			case clientChan <- c:
+			case clientChan <- ac:
 			case <-ctx.Done():
 				p.logger.Warnf("context done; error = %v", ctx.Err())
 				return
@@ -214,4 +218,52 @@ func redialProducer(ctx context.Context, p *Producer) chan chan *client {
 	}()
 
 	return clientChanChan
+}
+
+func (p *Producer) connect() (*amqpClient, error) {
+
+	p.logger.Debugf("connecting to %s", p.amqpURI)
+	connection, err := amqp.DialConfig(p.amqpURI, defaultAMQPConfig(p.tls))
+	if err != nil {
+		p.logger.Errorf("dial %s failed; error = %v ", p.amqpURI, err)
+		return nil, err
+	}
+
+	p.logger.Debug("getting channel ")
+	channel, err := connection.Channel()
+	if err != nil {
+		p.logger.Errorf("get channel failed; error = %v", err)
+		return nil, err
+	}
+
+	p.logger.Debugf("declaring exchange (%s)", p.exchange)
+	if err := channel.ExchangeDeclare(
+		p.exchange,     // name
+		p.exchangeType, // type
+		true,           // durable
+		false,          // auto-deleted
+		false,          // internal
+		false,          // noWait
+		nil,            // arguments
+	); err != nil {
+		p.logger.Errorf("exchange declare failed; error = %v", err)
+		return nil, err
+	}
+
+	// Reliable publisher confirms require confirm.select support from the
+	// connection.
+	var confirms chan amqp.Confirmation
+	if p.reliable {
+		if err := channel.Confirm(false); err != nil {
+			p.logger.Errorf("put channel in confirm mode failed; error = %v", err)
+			return nil, err
+		}
+		confirms = channel.NotifyPublish(make(chan amqp.Confirmation, confirmCapacity))
+	}
+
+	return &amqpClient{
+		connection: connection,
+		channel:    channel,
+		confirms:   confirms,
+	}, nil
 }
