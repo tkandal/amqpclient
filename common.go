@@ -25,14 +25,18 @@ func (ac *amqpClient) close() error {
 		close(ac.confirms)
 		ac.confirms = nil
 	}
-	if err := ac.channel.Close(); err != nil {
-		return err
+	if ac.channel != nil {
+		if err := ac.channel.Close(); err != nil {
+			return err
+		}
+		ac.channel = nil
 	}
-	ac.channel = nil
-	if err := ac.connection.Close(); err != nil {
-		return err
+	if ac.connection != nil {
+		if err := ac.connection.Close(); err != nil {
+			return err
+		}
+		ac.connection = nil
 	}
-	ac.connection = nil
 	return nil
 }
 
