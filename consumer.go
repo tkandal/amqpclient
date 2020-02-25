@@ -59,6 +59,7 @@ func (c *Consumer) handle(ctx context.Context) {
 
 	var deliveries <-chan amqp.Delivery
 	var err error
+	var canceled = false
 	for {
 		if c.client == nil {
 			select {
@@ -115,8 +116,11 @@ func (c *Consumer) handle(ctx context.Context) {
 			c.sendChan <- d
 		case <-ctx.Done():
 			c.logger.Errorf("context done; error = %v", ctx.Err())
-			if err = c.client.channel.Cancel(c.ctag, false); err != nil {
-				c.logger.Errorf("cancel channel failed; error = %v", err)
+			if !canceled {
+				if err = c.client.channel.Cancel(c.ctag, false); err != nil {
+					c.logger.Errorf("cancel channel failed; error = %v", err)
+				}
+				canceled = true
 			}
 		}
 	}
