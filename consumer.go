@@ -151,6 +151,7 @@ func (c *Consumer) redial(ctx context.Context) chan chan *amqpClient {
 				ac, err = c.connect()
 				if err != nil {
 					delay = connectDelay(delay)
+					c.logger.Warnf("waiting %d second(s) before reconnect", delay)
 					time.Sleep(delay)
 					continue
 				}
