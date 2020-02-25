@@ -21,10 +21,12 @@ type amqpClient struct {
 }
 
 func (ac *amqpClient) close() error {
+	/*
 	if ac.confirms != nil {
 		close(ac.confirms)
 		ac.confirms = nil
 	}
+	 */
 	if ac.channel != nil {
 		if err := ac.channel.Close(); err != nil {
 			return err
