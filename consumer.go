@@ -77,11 +77,11 @@ func (c *Consumer) handleDeliveries(ctx context.Context) {
 						return
 					}
 				case <-ctx.Done():
-					c.logger.Errorf("context done; error = %v", ctx.Err())
+					c.logger.Warnf("context done; error = %v", ctx.Err())
 					return
 				}
 			case <-ctx.Done():
-				c.logger.Errorf("context done; error = %v", ctx.Err())
+				c.logger.Warnf("context done; error = %v", ctx.Err())
 				return
 			}
 			c.logger.Debugf("queue bound to exchange, starting consume (consumer tag '%s')", c.ctag)
@@ -142,7 +142,7 @@ func (c *Consumer) redial(ctx context.Context) chan chan *amqpClient {
 			select {
 			case clientChanChan <- clientChan:
 			case <-ctx.Done():
-				c.logger.Errorf("context done; error = %v", ctx.Err())
+				c.logger.Warnf("context done; error = %v", ctx.Err())
 				return
 			}
 
@@ -162,7 +162,7 @@ func (c *Consumer) redial(ctx context.Context) chan chan *amqpClient {
 			select {
 			case clientChan <- ac:
 			case <-ctx.Done():
-				c.logger.Errorf("context done; error = %v", ctx.Err())
+				c.logger.Warnf("context done; error = %v", ctx.Err())
 				return
 			}
 		}
