@@ -24,7 +24,9 @@ type Consumer struct {
 	cancel         context.CancelFunc
 }
 
-// NewConsumer allocates a new AMQP consumer
+// NewConsumer allocates a new AMQP consumer, return a struct of itself, a delivery channel, or an error if
+// something fails.
+// Once this function is called it will reconnect to RabbitMQ endlessly until Shutdown is called.
 func NewConsumer(amqpURI string, tls *tls.Config, exchange string, exchangeType string, queue string, key string,
 	ctag string, logger *zap.SugaredLogger) (*Consumer, chan amqp.Delivery, error) {
 
@@ -127,6 +129,7 @@ func (c *Consumer) handle(ctx context.Context) {
 	}
 }
 
+// redial will connect to RabbitMQ endlessly, until Shutdown is called.
 func (c *Consumer) redial(ctx context.Context) chan chan *amqpClient {
 	clientChanChan := make(chan chan *amqpClient)
 
@@ -169,6 +172,7 @@ func (c *Consumer) redial(ctx context.Context) chan chan *amqpClient {
 	return clientChanChan
 }
 
+// connect and set up a channel to RabbitMQ.
 func (c *Consumer) connect() (*amqpClient, error) {
 
 	c.logger.Debugf("connecting to %s", c.amqpURI)

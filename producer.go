@@ -27,7 +27,8 @@ type Producer struct {
 	nacks          int64
 }
 
-// NewProducer allocates a new AMQP producer
+// NewProducer allocates a new AMQP producer, return a struct of itself, or an error if something fails.
+// Once this function is called it will reconnect to RabbitMQ endlessly until Shutdown is called.
 func NewProducer(amqpURI string, tls *tls.Config, exchange string, exchangeType string, key string, ctag string,
 	reliable bool, logger *zap.SugaredLogger) (*Producer, error) {
 
@@ -48,7 +49,7 @@ func NewProducer(amqpURI string, tls *tls.Config, exchange string, exchangeType 
 	return p, nil
 }
 
-// Publish publishes a new message with the exchange name and routing-key
+// Publish publishes a new message with the exchange name and routing-key.
 func (p *Producer) Publish(exchange string, routingKey string, body []byte) error {
 	p.logger.Debugf("publishing %s (%d bytes)", body, len(body))
 
@@ -127,6 +128,7 @@ func (p *Producer) Shutdown() {
 	p.cancel()
 }
 
+// redial will connect to RabbitMQ endlessly, until Shutdown is called.
 func (p *Producer) redial(ctx context.Context) chan chan *amqpClient {
 	clientChanChan := make(chan chan *amqpClient)
 
@@ -174,6 +176,7 @@ func (p *Producer) redial(ctx context.Context) chan chan *amqpClient {
 	return clientChanChan
 }
 
+// connect and set up a channel to RabbitMQ.
 func (p *Producer) connect() (*amqpClient, error) {
 
 	p.logger.Debugf("connecting to %s", p.amqpURI)
