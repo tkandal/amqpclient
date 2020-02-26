@@ -46,7 +46,7 @@ func NewConsumer(amqpURI string, tls *tls.Config, exchange string, exchangeType 
 	c.cancel = cancel
 	c.clientChanChan = c.redial(ctx)
 
-	go c.handle(ctx)
+	go c.handleDeliveries(ctx)
 	return c, c.sendChan, nil
 }
 
@@ -56,7 +56,7 @@ func (c *Consumer) Shutdown() {
 	c.cancel()
 }
 
-func (c *Consumer) handle(ctx context.Context) {
+func (c *Consumer) handleDeliveries(ctx context.Context) {
 	defer close(c.sendChan)
 
 	var deliveries <-chan amqp.Delivery
@@ -105,7 +105,7 @@ func (c *Consumer) handle(ctx context.Context) {
 		select {
 		case d, ok := <-deliveries:
 			if !ok {
-				c.logger.Error("deliveries channel closed")
+				c.logger.Warn("deliveries channel closed")
 				_ = c.client.close()
 				c.client = nil
 				continue
@@ -153,8 +153,8 @@ func (c *Consumer) redial(ctx context.Context) chan chan *amqpClient {
 			for ac == nil {
 				ac, err = c.connect()
 				if err != nil {
-					delay = connectDelay(delay)
-					c.logger.Warnf("waiting %d second(s) before reconnect", delay)
+					delay = calculateDelay(delay)
+					c.logger.Warnf("waiting %d second(s) before reconnect", delay/time.Second)
 					time.Sleep(delay)
 					continue
 				}

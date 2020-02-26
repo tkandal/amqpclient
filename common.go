@@ -51,7 +51,7 @@ func amqpDialer(nw string, addr string) (net.Conn, error) {
 	return net.DialTimeout(nw, addr, defaultDialTimeout)
 }
 
-func connectDelay(d time.Duration) time.Duration {
+func calculateDelay(d time.Duration) time.Duration {
 	d += time.Second
 	if d > maxReconnectDelay {
 		d = maxReconnectDelay
