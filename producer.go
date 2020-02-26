@@ -111,6 +111,8 @@ func (p *Producer) confirm() error {
 			p.acks++
 			p.logger.Infof("confirmed %d", confirm.DeliveryTag)
 			p.logger.Infof("confirmations (%d/%d/%d)", p.nacks, p.acks, p.sent)
+		case <-time.After(200 * time.Millisecond):
+			return fmt.Errorf("no confirm(s) received after 200ms")
 		}
 	}
 	return nil
@@ -157,7 +159,6 @@ func (p *Producer) redial(ctx context.Context) chan chan *amqpClient {
 					delay = calculateDelay(delay)
 					p.logger.Warnf("waiting %d second(s) before reconnect", delay/time.Second)
 					time.Sleep(delay)
-					continue
 				}
 			}
 
