@@ -2,9 +2,10 @@ package amqclient
 
 import (
 	"crypto/tls"
-	"github.com/streadway/amqp"
 	"net"
 	"time"
+
+	"github.com/streadway/amqp"
 )
 
 const (
