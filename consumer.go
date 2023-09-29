@@ -92,7 +92,7 @@ func (c *Consumer) handleDeliveries(ctx context.Context) {
 			deliveries, err = c.client.channel.Consume(
 				c.queue, // name
 				c.ctag,  // consumerTag,
-				true,    // autoAck
+				false,   // autoAck
 				false,   // exclusive
 				false,   // noLocal
 				false,   // noWait
@@ -120,6 +120,12 @@ func (c *Consumer) handleDeliveries(ctx context.Context) {
 				continue
 			}
 			c.sendChan <- d
+			if err = d.Ack(false); err != nil {
+				c.logger.Warnw("failed to ack delivery", "error", err)
+				if err = d.Nack(false, true); err != nil {
+					c.logger.Warnw("failed to nack delivery", "error", err)
+				}
+			}
 		case <-ctx.Done():
 			c.logger.Errorf("context done; error = %v", ctx.Err())
 			if !canceled {
@@ -136,6 +142,9 @@ func (c *Consumer) handleDeliveries(ctx context.Context) {
 // redial will connect to RabbitMQ endlessly, until Shutdown is called.
 func (c *Consumer) redial(ctx context.Context) chan chan *amqpClient {
 	clientChanChan := make(chan chan *amqpClient)
+	var err error
+	var ac *amqpClient
+	var delay = time.Duration(0)
 
 	go func() {
 		clientChan := make(chan *amqpClient)
@@ -149,10 +158,6 @@ func (c *Consumer) redial(ctx context.Context) chan chan *amqpClient {
 				c.logger.Warnf("context done; error = %v", ctx.Err())
 				return
 			}
-
-			var err error
-			var ac *amqpClient
-			var delay = time.Duration(0)
 
 			for ac == nil {
 				ac, err = c.connect()
