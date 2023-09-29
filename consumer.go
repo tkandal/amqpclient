@@ -114,11 +114,6 @@ func (c *Consumer) handleDeliveries(ctx context.Context) {
 				c.client = nil
 				continue
 			}
-			if err := d.Ack(false); err != nil {
-				c.logger.Errorf("acknowledge failed; error = %v", err)
-				_ = d.Nack(false, false)
-				continue
-			}
 			c.sendChan <- d
 			if err = d.Ack(false); err != nil {
 				c.logger.Warnw("failed to ack delivery", "error", err)
