@@ -4,9 +4,19 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"go.uber.org/zap"
 	"time"
+)
+
+/*
+ * Copyright (c) 2023 Trond Kandal, Norwegian University of Science and Technology
+ */
+
+const (
+	mimeTextPlain   = "text/plain"
+	contentEncoding = ""
+	mesgPriority    = 0 // 0-9
 )
 
 // Producer struct
@@ -72,11 +82,11 @@ func (p *Producer) Publish(exchange string, routingKey string, body []byte) erro
 			false,
 			amqp.Publishing{
 				Headers:         amqp.Table{},
-				ContentType:     "text/plain",
-				ContentEncoding: "",
+				ContentType:     mimeTextPlain,
+				ContentEncoding: contentEncoding,
 				Body:            body,
-				DeliveryMode:    amqp.Transient, // 1=non-persistent, 2=persistent
-				Priority:        0,              // 0-9
+				DeliveryMode:    amqp.Persistent, // 1=non-persistent, 2=persistent
+				Priority:        mesgPriority,
 				// a bunch of application/implementation-specific fields
 			},
 		); err != nil {

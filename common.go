@@ -2,11 +2,14 @@ package amqclient
 
 import (
 	"crypto/tls"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"net"
 	"time"
-
-	"github.com/streadway/amqp"
 )
+
+/*
+ * Copyright (c) 2023 Trond Kandal, Norwegian University of Science and Technology
+ */
 
 const (
 	defaultDialTimeout = 10 * time.Second
@@ -53,9 +56,8 @@ func amqpDialer(nw string, addr string) (net.Conn, error) {
 }
 
 func calculateDelay(d time.Duration) time.Duration {
-	d += time.Second
-	if d > maxReconnectDelay {
-		d = maxReconnectDelay
+	if d < maxReconnectDelay {
+		d += time.Second
 	}
 	return d
 }

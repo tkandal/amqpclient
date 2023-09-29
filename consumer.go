@@ -3,10 +3,14 @@ package amqclient
 import (
 	"context"
 	"crypto/tls"
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"go.uber.org/zap"
 	"time"
 )
+
+/*
+ * Copyright (c) 2023 Trond Kandal, Norwegian University of Science and Technology
+ */
 
 // Consumer struct
 type Consumer struct {
@@ -154,7 +158,7 @@ func (c *Consumer) redial(ctx context.Context) chan chan *amqpClient {
 				ac, err = c.connect()
 				if err != nil {
 					delay = calculateDelay(delay)
-					c.logger.Warnf("waiting %d second(s) before reconnect", delay/time.Second)
+					c.logger.Warnf("waiting %s before reconnect", delay)
 					time.Sleep(delay)
 				}
 			}

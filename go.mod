@@ -1,9 +1,9 @@
 module github.com/tkandal/amqpclient
 
-go 1.19
+go 1.21
 
 require (
-	github.com/streadway/amqp v1.0.0
+	github.com/rabbitmq/amqp091-go v1.8.1
 	go.uber.org/zap v1.24.0
 )
 
