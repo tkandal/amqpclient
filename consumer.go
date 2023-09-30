@@ -154,6 +154,9 @@ func (c *Consumer) redial(ctx context.Context) chan chan *amqpClient {
 				c.logger.Warnw("context canceled", "error", ctx.Err())
 				return
 			}
+			if isClosed(ac) {
+				ac = nil
+			}
 			var delay = time.Duration(0)
 
 			for ac == nil {

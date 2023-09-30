@@ -158,6 +158,10 @@ func (p *Producer) redial(ctx context.Context) chan chan *amqpClient {
 				p.client = nil
 				return
 			}
+			if isClosed(ac) {
+				ac = nil
+			}
+
 			var delay = time.Duration(0)
 
 			for ac == nil {

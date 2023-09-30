@@ -61,3 +61,10 @@ func calculateDelay(d time.Duration) time.Duration {
 	}
 	return d
 }
+
+func isClosed(ac *amqpClient) bool {
+	if ac == nil {
+		return true
+	}
+	return ac != nil && ((ac.channel != nil && ac.channel.IsClosed()) || (ac.connection != nil && ac.connection.IsClosed()))
+}
