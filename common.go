@@ -22,12 +22,20 @@ const (
 	defaultHeartbeat   = 10 * time.Second
 	defaultLocale      = "en_US"
 	maxReconnectDelay  = 30 * time.Second
-	confirmCapacity    = 128
+	confirmCapacity    = 256
 	defaultEncoding    = ""
+	mesgPriority       = 0 // 0-9
+	waitForConfirm     = 200 * time.Millisecond
 )
 
+type commonClient struct {
+	cfg *AMQPConfig
+}
+
 // AMQPConfig is the configuration for both consumer and producer.
-// One may either send in this object to the constructors as parameter or use the option functions as parameters.
+// One may either send in this object to the constructors as parameter, use the option functions as
+// configuration parameters or both.
+// NB! Option functions as parameters to the constructors will always override any other configuration.
 type AMQPConfig struct {
 	AMQPServer          string        `json:"AMQPServer"`
 	AMQPUser            string        `json:"AMQPUser"`
@@ -48,7 +56,7 @@ type AMQPConfig struct {
 // AMQPOption defines an option function that may be used as parameter to the constructors.
 type AMQPOption func(c *AMQPConfig) AMQPOption
 
-// AMQPServer set the URL for the AMQP-server, must have the following format amqp://host:port.
+// AMQPServer set the URL for the AMQP-server, must have the following URL-format amqp://host:port.
 // Default amqp://localhost:5672
 func AMQPServer(s string) AMQPOption {
 	return func(c *AMQPConfig) AMQPOption {

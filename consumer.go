@@ -16,7 +16,7 @@ import (
 
 // Consumer struct
 type Consumer struct {
-	cfg            *AMQPConfig
+	commonClient
 	log            *zap.SugaredLogger
 	client         *amqpClient
 	clientChanChan chan chan *amqpClient
@@ -49,14 +49,13 @@ func NewConsumer(cfg *AMQPConfig, log *zap.SugaredLogger, opts ...AMQPOption) (*
 	}
 
 	c := &Consumer{
-		cfg:      conf,
-		log:      log,
-		sendChan: make(chan amqp.Delivery),
+		commonClient: commonClient{cfg: conf},
+		log:          log,
 	}
-
 	for _, opt := range opts {
 		opt(c.cfg)
 	}
+	c.sendChan = make(chan amqp.Delivery, c.cfg.AMQPPrefetch)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel

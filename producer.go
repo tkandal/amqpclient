@@ -14,14 +14,9 @@ import (
  * Copyright (c) 2023 Trond Kandal, Norwegian University of Science and Technology
  */
 
-const (
-	mesgPriority   = 0 // 0-9
-	waitForConfirm = 200 * time.Millisecond
-)
-
-// Producer struct
+// Producer struct.
 type Producer struct {
-	cfg            *AMQPConfig
+	commonClient
 	reliable       bool
 	log            *zap.SugaredLogger
 	client         *amqpClient
@@ -32,10 +27,9 @@ type Producer struct {
 	nacks          int64
 }
 
-// NewProducer allocates a new AMQP producer, return a struct of itself, or an error if something fails.
+// NewProducer allocates a new AMQP-producer, return a struct of itself, or an error if something fails.
 // Once this function is called it will reconnect to RabbitMQ endlessly until Shutdown is called.
 func NewProducer(cfg *AMQPConfig, reliable bool, logger *zap.SugaredLogger, opts ...AMQPOption) (*Producer, error) {
-
 	conf := cfg
 	if conf == nil {
 		conf = &AMQPConfig{
@@ -57,9 +51,9 @@ func NewProducer(cfg *AMQPConfig, reliable bool, logger *zap.SugaredLogger, opts
 	}
 
 	p := &Producer{
-		cfg:      conf,
-		reliable: reliable,
-		log:      logger,
+		commonClient: commonClient{cfg: conf},
+		reliable:     reliable,
+		log:          logger,
 	}
 	for _, opt := range opts {
 		opt(p.cfg)
