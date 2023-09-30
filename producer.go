@@ -17,7 +17,6 @@ const (
 	mimeTextPlain   = "text/plain"
 	contentEncoding = ""
 	mesgPriority    = 0 // 0-9
-	publishDeadline = 5 * time.Second
 	waitForConfirm  = 200 * time.Millisecond
 )
 
@@ -61,8 +60,8 @@ func NewProducer(amqpURI string, tls *tls.Config, exchange string, exchangeType 
 	return p, nil
 }
 
-// Publish publishes a new message with the exchange name and routing-key.
-func (p *Producer) Publish(exchange string, routingKey string, body []byte) error {
+// Publish publishes a new message with the context, exchange name and routing-key.
+func (p *Producer) Publish(ctx context.Context, exchange string, routingKey string, body []byte) error {
 	p.logger.Debugf("publishing %s (%d bytes)", body, len(body))
 
 	for {
@@ -76,9 +75,8 @@ func (p *Producer) Publish(exchange string, routingKey string, body []byte) erro
 				return fmt.Errorf("failed to get a new producer, channel is closed")
 			}
 		}
-		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(publishDeadline))
 
-		err := p.client.channel.PublishWithContext(ctx, exchange, routingKey, false, false,
+		if err := p.client.channel.PublishWithContext(ctx, exchange, routingKey, false, false,
 			amqp.Publishing{
 				Headers:         amqp.Table{},
 				ContentType:     mimeTextPlain,
@@ -87,10 +85,8 @@ func (p *Producer) Publish(exchange string, routingKey string, body []byte) erro
 				DeliveryMode:    amqp.Persistent, // 1=non-persistent, 2=persistent
 				Priority:        mesgPriority,
 				// a bunch of application/implementation-specific fields
-			})
-		cancel()
+			}); err != nil {
 
-		if err != nil {
 			p.logger.Errorw("failed to publish message", "error", err)
 			_ = p.client.close()
 			p.client = nil
@@ -98,7 +94,7 @@ func (p *Producer) Publish(exchange string, routingKey string, body []byte) erro
 		}
 		p.sent++
 		if p.client.confirms != nil {
-			if err = p.confirm(); err != nil {
+			if err := p.confirm(); err != nil {
 				// Ignore error, only log.
 				p.logger.Warnw("failed to confirm message", "error", err)
 			}
