@@ -17,6 +17,8 @@ const (
 	mimeTextPlain   = "text/plain"
 	contentEncoding = ""
 	mesgPriority    = 0 // 0-9
+	publishDeadline = 5 * time.Second
+	waitForConfirm  = 200 * time.Millisecond
 )
 
 // Producer struct
@@ -67,19 +69,16 @@ func (p *Producer) Publish(exchange string, routingKey string, body []byte) erro
 		if p.client == nil {
 			clientChan, ok := <-p.clientChanChan
 			if !ok {
-				return fmt.Errorf("cannot get a new producer-channel; error = channel is closed")
+				return fmt.Errorf("failed to get a new producer-channel, channel is closed")
 			}
 			p.client, ok = <-clientChan
 			if !ok {
-				return fmt.Errorf("cannot get a new producer; error = channel is closed")
+				return fmt.Errorf("failed to get a new producer, channel is closed")
 			}
 		}
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(publishDeadline))
 
-		if err := p.client.channel.Publish(
-			exchange,
-			routingKey,
-			false,
-			false,
+		err := p.client.channel.PublishWithContext(ctx, exchange, routingKey, false, false,
 			amqp.Publishing{
 				Headers:         amqp.Table{},
 				ContentType:     mimeTextPlain,
@@ -88,18 +87,20 @@ func (p *Producer) Publish(exchange string, routingKey string, body []byte) erro
 				DeliveryMode:    amqp.Persistent, // 1=non-persistent, 2=persistent
 				Priority:        mesgPriority,
 				// a bunch of application/implementation-specific fields
-			},
-		); err != nil {
-			p.logger.Errorf("publish failed; error = %v", err)
+			})
+		cancel()
+
+		if err != nil {
+			p.logger.Errorw("failed to publish message", "error", err)
 			_ = p.client.close()
 			p.client = nil
 			return err
 		}
 		p.sent++
 		if p.client.confirms != nil {
-			if err := p.confirm(); err != nil {
-				// Ignore error, only log
-				p.logger.Warnf("get confirm failed; error = %v", err)
+			if err = p.confirm(); err != nil {
+				// Ignore error, only log.
+				p.logger.Warnw("failed to confirm message", "error", err)
 			}
 		}
 		break
@@ -121,20 +122,20 @@ func (p *Producer) confirm() error {
 			p.acks++
 			p.logger.Infof("confirmed %d", confirm.DeliveryTag)
 			p.logger.Infof("confirmations (%d/%d/%d)", p.nacks, p.acks, p.sent)
-		case <-time.After(200 * time.Millisecond):
-			return fmt.Errorf("no confirm(s) received after 200ms")
+		case <-time.After(waitForConfirm):
+			return fmt.Errorf("no confirm(s) received after %s", waitForConfirm)
 		}
 	}
 	return nil
 }
 
-// Shutdown shuts down this producer
+// Shutdown shuts down this producer.
 func (p *Producer) Shutdown() {
 	p.logger.Warn("producer received shutdown ...")
 	if p.client.confirms != nil {
 		if err := p.confirm(); err != nil {
 			// Ignore error, only log
-			p.logger.Warnf("get confirm failed; error = %v", err)
+			p.logger.Warnw("failed to confirm massages", "error", err)
 		}
 	}
 	p.cancel()
@@ -143,9 +144,12 @@ func (p *Producer) Shutdown() {
 // redial will connect to RabbitMQ endlessly, until Shutdown is called.
 func (p *Producer) redial(ctx context.Context) chan chan *amqpClient {
 	clientChanChan := make(chan chan *amqpClient)
+	clientChan := make(chan *amqpClient)
+
+	var err error
+	var ac *amqpClient
 
 	go func() {
-		clientChan := make(chan *amqpClient)
 		defer close(clientChan)
 		defer close(clientChanChan)
 
@@ -153,21 +157,18 @@ func (p *Producer) redial(ctx context.Context) chan chan *amqpClient {
 			select {
 			case clientChanChan <- clientChan:
 			case <-ctx.Done():
-				p.logger.Warnf("context done; error = %v", ctx.Err())
+				p.logger.Warnw("context canceled", "error", ctx.Err())
 				_ = p.client.close()
 				p.client = nil
 				return
 			}
-
-			var err error
-			var ac *amqpClient
 			var delay = time.Duration(0)
 
 			for ac == nil {
 				ac, err = p.connect()
 				if err != nil {
 					delay = calculateDelay(delay)
-					p.logger.Warnf("waiting %d second(s) before reconnect", delay/time.Second)
+					p.logger.Warnf("waiting %s before reconnect", delay)
 					time.Sleep(delay)
 				}
 			}
@@ -175,7 +176,7 @@ func (p *Producer) redial(ctx context.Context) chan chan *amqpClient {
 			select {
 			case clientChan <- ac:
 			case <-ctx.Done():
-				p.logger.Warnf("context done; error = %v", ctx.Err())
+				p.logger.Warnw("context canceled", "error", ctx.Err())
 				_ = p.client.close()
 				p.client = nil
 				return
@@ -193,19 +194,19 @@ func (p *Producer) connect() (*amqpClient, error) {
 	p.logger.Debugf("connecting to %s", p.amqpURI)
 	connection, err := amqp.DialConfig(p.amqpURI, defaultAMQPConfig(p.tls))
 	if err != nil {
-		p.logger.Errorf("dial %s failed; error = %v ", p.amqpURI, err)
+		p.logger.Errorw(fmt.Sprintf("failed to dial %s", p.amqpURI), "error", err)
 		return nil, err
 	}
 
 	p.logger.Debug("getting channel ")
 	channel, err := connection.Channel()
 	if err != nil {
-		p.logger.Errorf("get channel failed; error = %v", err)
+		p.logger.Errorw("failed to get channel", "error", err)
 		return nil, err
 	}
 
 	p.logger.Debugf("declaring exchange (%s)", p.exchange)
-	if err := channel.ExchangeDeclare(
+	if err = channel.ExchangeDeclare(
 		p.exchange,     // name
 		p.exchangeType, // type
 		true,           // durable
@@ -214,7 +215,7 @@ func (p *Producer) connect() (*amqpClient, error) {
 		false,          // noWait
 		nil,            // arguments
 	); err != nil {
-		p.logger.Errorf("exchange declare failed; error = %v", err)
+		p.logger.Errorw("failed to declare exchange", "error", err)
 		return nil, err
 	}
 
@@ -223,7 +224,7 @@ func (p *Producer) connect() (*amqpClient, error) {
 	var confirms chan amqp.Confirmation
 	if p.reliable {
 		if err := channel.Confirm(false); err != nil {
-			p.logger.Errorf("put channel in confirm mode failed; error = %v", err)
+			p.logger.Errorw("failed to put put channel in confirm mode", "error", err)
 			return nil, err
 		}
 		confirms = channel.NotifyPublish(make(chan amqp.Confirmation, confirmCapacity))

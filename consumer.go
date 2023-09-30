@@ -3,6 +3,7 @@ package amqclient
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.uber.org/zap"
 	"time"
@@ -71,21 +72,21 @@ func (c *Consumer) handleDeliveries(ctx context.Context) {
 			select {
 			case clientChan, ok := <-c.clientChanChan:
 				if !ok {
-					c.logger.Errorf("cannot get a new client-channel; channel is closed")
+					c.logger.Errorf("cannot get a new client-channel, channel is closed")
 					return
 				}
 				select {
 				case c.client, ok = <-clientChan:
 					if !ok {
-						c.logger.Errorf("cannot get a new client; channel is closed")
+						c.logger.Errorf("cannot get a new client, channel is closed")
 						return
 					}
 				case <-ctx.Done():
-					c.logger.Warnf("context done; error = %v", ctx.Err())
+					c.logger.Warnw("context canceled", "error", ctx.Err())
 					return
 				}
 			case <-ctx.Done():
-				c.logger.Warnf("context done; error = %v", ctx.Err())
+				c.logger.Warnw("context canceled", "error", ctx.Err())
 				return
 			}
 			c.logger.Debugf("queue bound to exchange, starting consume (consumer tag '%s')", c.ctag)
@@ -99,7 +100,7 @@ func (c *Consumer) handleDeliveries(ctx context.Context) {
 				nil,     // arguments
 			)
 			if err != nil {
-				c.logger.Errorf("deliver channel failed; error = %v", err)
+				c.logger.Errorw("failed to get deliver channel", "error", err)
 				_ = c.client.close()
 				c.client = nil
 				continue
@@ -122,10 +123,10 @@ func (c *Consumer) handleDeliveries(ctx context.Context) {
 				}
 			}
 		case <-ctx.Done():
-			c.logger.Errorf("context done; error = %v", ctx.Err())
+			c.logger.Errorw("context canceled", "error", ctx.Err())
 			if !canceled {
 				if err = c.client.channel.Cancel(c.ctag, false); err != nil {
-					c.logger.Errorf("cancel channel failed; error = %v", err)
+					c.logger.Warnw("failed to cancel channel", "error", err)
 					continue
 				}
 				canceled = true
@@ -137,12 +138,12 @@ func (c *Consumer) handleDeliveries(ctx context.Context) {
 // redial will connect to RabbitMQ endlessly, until Shutdown is called.
 func (c *Consumer) redial(ctx context.Context) chan chan *amqpClient {
 	clientChanChan := make(chan chan *amqpClient)
+	clientChan := make(chan *amqpClient)
+
 	var err error
 	var ac *amqpClient
-	var delay = time.Duration(0)
 
 	go func() {
-		clientChan := make(chan *amqpClient)
 		defer close(clientChan)
 		defer close(clientChanChan)
 
@@ -150,9 +151,10 @@ func (c *Consumer) redial(ctx context.Context) chan chan *amqpClient {
 			select {
 			case clientChanChan <- clientChan:
 			case <-ctx.Done():
-				c.logger.Warnf("context done; error = %v", ctx.Err())
+				c.logger.Warnw("context canceled", "error", ctx.Err())
 				return
 			}
+			var delay = time.Duration(0)
 
 			for ac == nil {
 				ac, err = c.connect()
@@ -166,7 +168,7 @@ func (c *Consumer) redial(ctx context.Context) chan chan *amqpClient {
 			select {
 			case clientChan <- ac:
 			case <-ctx.Done():
-				c.logger.Warnf("context done; error = %v", ctx.Err())
+				c.logger.Warnw("context canceled", "error", ctx.Err())
 				return
 			}
 		}
@@ -181,20 +183,20 @@ func (c *Consumer) connect() (*amqpClient, error) {
 	c.logger.Debugf("connecting to %s", c.amqpURI)
 	connection, err := amqp.DialConfig(c.amqpURI, defaultAMQPConfig(c.tls))
 	if err != nil {
-		c.logger.Errorf("dial %s failed; error = %v ", c.amqpURI, err)
+		c.logger.Errorw(fmt.Sprintf("failed to dial %s", c.amqpURI), "error", err)
 		return nil, err
 	}
 
 	c.logger.Debug("getting channel")
 	channel, err := connection.Channel()
 	if err != nil {
-		c.logger.Errorf("get channel failed; error = %v", err)
+		c.logger.Errorw("failed to get channel", "error", err)
 		return nil, err
 	}
 
 	c.logger.Debug("setting QoS")
 	if err = channel.Qos(1, 0, false); err != nil {
-		c.logger.Errorf("set QoS failed; error = %v", err)
+		c.logger.Errorw("failed to set QoS", "error", err)
 		return nil, err
 	}
 
@@ -208,7 +210,7 @@ func (c *Consumer) connect() (*amqpClient, error) {
 		false,          // noWait
 		nil,            // arguments
 	); err != nil {
-		c.logger.Errorf("declare exchange failed; error = %v", err)
+		c.logger.Errorw("failed to declare exchange", "error", err)
 		return nil, err
 	}
 
@@ -216,13 +218,13 @@ func (c *Consumer) connect() (*amqpClient, error) {
 	state, err := channel.QueueDeclare(
 		c.queue, // name of the queue
 		true,    // durable
-		false,   // delete when usused
+		false,   // delete when unused
 		false,   // exclusive
 		false,   // noWait
 		nil,     // arguments
 	)
 	if err != nil {
-		c.logger.Errorf("declare queue failed; error = %v", err)
+		c.logger.Errorw("failed to declare queue", "error", err)
 		return nil, err
 	}
 
@@ -235,7 +237,7 @@ func (c *Consumer) connect() (*amqpClient, error) {
 		false,        // noWait
 		nil,          // arguments
 	); err != nil {
-		c.logger.Errorf("bind queue failed; error = %v", err)
+		c.logger.Errorw("failed to bind queue", "error", err)
 		return nil, err
 	}
 
