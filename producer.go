@@ -143,6 +143,11 @@ func (p *Producer) Shutdown() {
 	p.cancel()
 }
 
+// Config returns the current configuration.
+func (p *Producer) Config() *AMQPConfig {
+	return p.cfg
+}
+
 // redial will connect to RabbitMQ endlessly, until Shutdown is called.
 func (p *Producer) redial(ctx context.Context) chan chan *amqpClient {
 	clientChanChan := make(chan chan *amqpClient)

@@ -71,6 +71,11 @@ func (c *Consumer) Shutdown() {
 	c.cancel()
 }
 
+// Config returns the current configuration.
+func (c *Consumer) Config() *AMQPConfig {
+	return c.cfg
+}
+
 func (c *Consumer) handleDeliveries(ctx context.Context) {
 	defer close(c.sendChan)
 
