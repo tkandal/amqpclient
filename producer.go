@@ -45,6 +45,7 @@ func NewProducer(cfg *AMQPConfig, reliable bool, logger *zap.SugaredLogger, opts
 			AMQPTimeout:         defaultTimeout,
 			AMQPContentType:     defaultContentType,
 			AMQPContentEncoding: defaultEncoding,
+			AMQPAutoAck:         false,
 			TLS:                 nil,
 			ClientName:          filepath.Base(os.Args[0]),
 		}

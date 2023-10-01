@@ -43,6 +43,7 @@ func NewConsumer(cfg *AMQPConfig, log *zap.SugaredLogger, opts ...AMQPOption) (*
 			AMQPTimeout:         defaultTimeout,
 			AMQPContentType:     defaultContentType,
 			AMQPContentEncoding: defaultEncoding,
+			AMQPAutoAck:         false,
 			TLS:                 nil,
 			ClientName:          filepath.Base(os.Args[0]),
 		}
@@ -106,13 +107,13 @@ func (c *Consumer) handleDeliveries(ctx context.Context) {
 			}
 			c.log.Debugf("queue bound to exchange, starting consume (consumer tag '%s')", c.cfg.ClientName)
 			deliveries, err = c.client.channel.Consume(
-				c.cfg.AMQPQueue,  // name
-				c.cfg.ClientName, // consumerTag,
-				false,            // autoAck
-				false,            // exclusive
-				false,            // noLocal
-				false,            // noWait
-				nil,              // arguments
+				c.cfg.AMQPQueue,   // name
+				c.cfg.ClientName,  // consumerTag,
+				c.cfg.AMQPAutoAck, // autoAck
+				false,             // exclusive
+				false,             // noLocal
+				false,             // noWait
+				nil,               // arguments
 			)
 			if err != nil {
 				c.log.Errorw("failed to get deliver channel", "error", err)
@@ -131,12 +132,6 @@ func (c *Consumer) handleDeliveries(ctx context.Context) {
 				continue
 			}
 			c.sendChan <- d
-			if err = d.Ack(false); err != nil {
-				c.log.Warnw(fmt.Sprintf("failed to ack delivery %d", d.DeliveryTag), "error", err)
-				if err = d.Nack(false, true); err != nil {
-					c.log.Warnw("failed to nack delivery", "error", err)
-				}
-			}
 		case <-ctx.Done():
 			c.log.Errorw("context canceled", "error", ctx.Err())
 			if !canceled {

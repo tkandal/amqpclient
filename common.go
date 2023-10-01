@@ -49,6 +49,7 @@ type AMQPConfig struct {
 	AMQPTimeout         time.Duration `json:"AMQPTimeout"`
 	AMQPContentType     string        `json:"AMQPContentType"`
 	AMQPContentEncoding string        `json:"AMQPContentEncoding"`
+	AMQPAutoAck         bool          `json:"AMQPAutoAck"`
 	TLS                 *tls.Config   `json:"-"`
 	ClientName          string        `json:"ClientName"`
 }
@@ -162,6 +163,16 @@ func AMQPContentEncoding(s string) AMQPOption {
 		prev := c.AMQPContentEncoding
 		c.AMQPContentEncoding = s
 		return AMQPContentEncoding(prev)
+	}
+}
+
+// AMQPAutoAck turns on or off auto-ack on the AMQP-server.  Default false.
+// When AMQPAutoAck is false, the consumer client must ack or nack every delivery.
+func AMQPAutoAck(b bool) AMQPOption {
+	return func(c *AMQPConfig) AMQPOption {
+		prev := c.AMQPAutoAck
+		c.AMQPAutoAck = b
+		return AMQPAutoAck(prev)
 	}
 }
 
